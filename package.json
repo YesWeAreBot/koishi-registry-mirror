@@ -1,21 +1,29 @@
 {
   "name": "koishi-registry-mirror",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "dist/server.js",
   "repository": "git@github.com:YesWeAreBot/koishi-registry-mirror.git",
   "author": "HydroGest <2445691453@qq.com>",
   "license": "MIT",
   "private": true,
   "scripts": {
     "build": "tsc",
-    "generate": "node dist/index.js"
+    "dev": "bun run src/cli.ts server -p 3000",
+    "start": "bun run dist/cli.js server",
+    "serve": "bun run src/cli.ts server",
+    "generate": "bun run src/cli.ts generate",
+    "test": "bun test"
   },
   "dependencies": {
+    "@types/minimist": "^1.2.5",
     "axios": "^1.11.0",
+    "minimist": "^1.2.8",
     "schemastery": "^3.17.0"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@types/node": "^20.19.13",
+    "bun-types": "^1.2.22",
     "typescript": "^5.9.2"
   }
 }

@@ -1,0 +1,46 @@
+name: Registry Sync (pages)
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install deps
+        run: bun install --frozen-lockfile || bun install
+
+      - name: Build
+        run: bun run build
+
+      - name: Generate registry
+        run: bun run generate
+
+      - name: Publish to pages branch
+        run: |
+          cp index.json /tmp/index.json
+          git checkout --orphan pages || git checkout pages
+          git reset --hard
+          cp /tmp/index.json index.json
+          echo "" > .nojekyll
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: update index.json $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || true
+          git push -f origin pages

@@ -1,15 +1,16 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "target": "ES2022",
     "jsx": "react-jsx",
     "strictNullChecks": true,
     "strictFunctionTypes": true,
     "sourceMap": true,
     "outDir": "dist",
-    "types": ["node"]
+    "types": ["bun-types", "node"]
   },
   "exclude": [
     "node_modules",
