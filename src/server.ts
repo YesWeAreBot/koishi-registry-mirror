@@ -1,37 +1,51 @@
-import { buildRegistry } from "./registry";
+import { buildRegistry, RegistryResult } from "./registry";
 
-interface ServerConfig {
+export interface ServerConfig {
   port: number;
   cacheTime: number;
   timeout: number;
   sources: string[];
   host: string;
   corsOrigin: string;
+  rawUrl?: string | null;
 }
 
-// 默认配置
-const DEFAULT_CONFIG: ServerConfig = {
-  port: 3000,
-  cacheTime: 300, // 5分钟
-  timeout: 15000,
-  sources: [
-    "https://koishi-registry.yumetsuki.moe/index.json",
-    "https://kp.itzdrli.cc/index.json",
-    "https://registry.koishi.t4wefan.pub/index.json",
-    "https://cdn.jsdelivr.net/gh/YesWeAreBot/koishi-registry-mirror@pages/index.json",
-    "https://gh-proxy.com/https://raw.githubusercontent.com/YesWeAreBot/koishi-registry-mirror/refs/heads/pages/index.json",
-  ],
-  host: "0.0.0.0",
-  corsOrigin: "*",
+interface CacheEntry {
+  data: RegistryResult;
+  fetchedAt: number;
+  expiresAt: number;
+}
+
+type BunServer = ReturnType<typeof Bun.serve>;
+
+interface InternalState {
+  cache: CacheEntry | null;
+  error: string | null;
+  refreshTask: Promise<void> | null;
+  refreshTimer: ReturnType<typeof setInterval> | null;
+  lastRefreshReason: string | null;
+}
+
+const logPrefix = "[registry-mirror]";
+
+export type MirrorServer = BunServer & {
+  stop(): number;
+  refresh(reason?: string): Promise<void>;
 };
 
-// 创建 HTTP 服务器（带简易内存缓存与并发抑制）
-async function createServer(config: ServerConfig) {
-  type CacheEntry = { data: any; ts: number } | null;
-  let cache: CacheEntry = null;
-  let updating: Promise<any> | null = null;
+export async function createServer(config: ServerConfig): Promise<MirrorServer> {
+  const ttlMs = Math.max(1_000, config.cacheTime * 1_000);
+  const proactiveThresholdMs = Math.max(1_000, Math.min(ttlMs / 2, 30_000));
+  const cadenceMs = Math.max(1_000, Math.min(ttlMs / 2, 60_000));
 
-  // 添加 CORS 头的辅助函数
+  const state: InternalState = {
+    cache: null,
+    error: null,
+    refreshTask: null,
+    refreshTimer: null,
+    lastRefreshReason: null,
+  };
+
   const withCors = (response: Response): Response => {
     const headers = new Headers(response.headers);
     headers.set("Access-Control-Allow-Origin", config.corsOrigin);
@@ -45,7 +59,78 @@ async function createServer(config: ServerConfig) {
     });
   };
 
-  // 使用 Bun.serve 创建服务器
+  const runRefresh = async (reason: string, failHard: boolean): Promise<void> => {
+    const started = Date.now();
+    state.lastRefreshReason = reason;
+    console.info(
+      `${logPrefix} refresh started (${reason}) with ${config.sources.length} source(s)`
+    );
+    try {
+      const data = await buildRegistry({
+        sources: config.sources,
+        timeoutMs: config.timeout,
+        rawUrl: config.rawUrl ?? undefined,
+      });
+      const fetchedAt = Date.now();
+      state.cache = {
+        data,
+        fetchedAt,
+        expiresAt: fetchedAt + ttlMs,
+      };
+      state.error = null;
+      console.info(
+        `${logPrefix} refresh succeeded in ${Date.now() - started}ms (reason: ${reason}, total: ${data.total})`
+      );
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : String(error);
+      console.error(`${logPrefix} refresh failed (${reason}):`, error);
+      if (!state.cache || failHard) {
+        throw error;
+      }
+    }
+  };
+
+  const triggerRefresh = (reason: string, failHard = false): Promise<void> => {
+    if (!state.refreshTask) {
+      state.refreshTask = runRefresh(reason, failHard).finally(() => {
+        state.refreshTask = null;
+      });
+      return state.refreshTask;
+    }
+
+    const pending = state.refreshTask;
+    if (!failHard) {
+      return pending;
+    }
+
+    return pending.then(() => {
+      if (state.error) {
+        throw new Error(state.error);
+      }
+    });
+  };
+
+  const scheduleProactiveRefresh = () => {
+    if (state.refreshTimer) return;
+    state.refreshTimer = setInterval(() => {
+      const now = Date.now();
+      if (!state.cache) {
+        void triggerRefresh("interval-no-cache");
+        return;
+      }
+      const timeToExpiry = state.cache.expiresAt - now;
+      if (timeToExpiry <= proactiveThresholdMs) {
+        void triggerRefresh("interval-expiring");
+      }
+    }, cadenceMs);
+  };
+
+  const ensureUsableCache = async () => {
+    if (!state.cache) {
+      await triggerRefresh("request-miss", true);
+    }
+  };
+
   const server = Bun.serve({
     port: config.port,
     hostname: config.host,
@@ -53,85 +138,84 @@ async function createServer(config: ServerConfig) {
       const url = new URL(request.url);
       const path = url.pathname;
 
-      // 处理 OPTIONS 请求 (CORS 预检)
       if (request.method === "OPTIONS") {
         return withCors(new Response(null, { status: 204 }));
       }
 
       try {
-        // 健康检查端点
         if (path === "/health") {
-          const healthy = cache !== null;
-          const lastUpdate = cache?.data?.generatedAt || "Never";
-          const cacheExpiry = cache
-            ? new Date(cache.ts + config.cacheTime * 1000).toISOString()
-            : "No cache";
-          const total = cache?.data?.total || 0;
-          const status = {
+          const cache = state.cache;
+          const healthy = Boolean(cache);
+          const payload = {
             healthy,
-            lastUpdate,
-            cacheExpiry,
-            totalPlugins: total,
+            lastUpdate: cache?.data.generatedAt ?? null,
+            cacheExpiry: cache ? new Date(cache.expiresAt).toISOString() : null,
+            totalPlugins: cache?.data.total ?? 0,
             activeSources: config.sources.length,
-            errors: updating ? [] : [],
+            isUpdating: Boolean(state.refreshTask),
+            lastError: state.error,
           };
-          return withCors(
-            Response.json(status, { status: healthy ? 200 : 503 })
-          );
+          return withCors(Response.json(payload, { status: healthy ? 200 : 503 }));
         }
 
-        // 状态端点
         if (path === "/status") {
           const mem = process.memoryUsage();
-          const status = {
-            config,
-            memory: {
-              rss: Math.round(mem.rss / 1024 / 1024),
-              heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
-              heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+          const cache = state.cache;
+          const payload = {
+            config: {
+              port: config.port,
+              host: config.host,
+              cacheTime: config.cacheTime,
+              timeout: config.timeout,
+              sources: config.sources,
+              corsOrigin: config.corsOrigin,
             },
+            cache: cache
+              ? {
+                  fetchedAt: new Date(cache.fetchedAt).toISOString(),
+                  expiresAt: new Date(cache.expiresAt).toISOString(),
+                  ageSeconds: Math.max(0, Math.floor((Date.now() - cache.fetchedAt) / 1_000)),
+                  remainingSeconds: Math.max(
+                    0,
+                    Math.floor((cache.expiresAt - Date.now()) / 1_000)
+                  ),
+                  totalPlugins: cache.data.total,
+                }
+              : null,
             uptime: process.uptime(),
-            isUpdating: Boolean(updating),
-            cacheTimeLeft: cache
-              ? Math.max(0, cache.ts + config.cacheTime * 1000 - Date.now())
-              : 0,
+            isUpdating: Boolean(state.refreshTask),
+            lastRefreshReason: state.lastRefreshReason,
+            lastError: state.error,
+            memory: {
+              rssMB: Math.round(mem.rss / 1_048_576),
+              heapTotalMB: Math.round(mem.heapTotal / 1_048_576),
+              heapUsedMB: Math.round(mem.heapUsed / 1_048_576),
+            },
           };
-          return withCors(Response.json(status));
+          return withCors(Response.json(payload));
         }
 
-        // 主要的镜像端点
         if (path === "/" || path === "/index.json") {
-          // 简单缓存策略：有效则直接返回；否则单次刷新（并发复用同一个 Promise）
-          const cacheValid =
-            cache && Date.now() - cache.ts < config.cacheTime * 1000;
-          if (!cacheValid) {
-            if (!updating) {
-              updating = buildRegistry({
-                sources: config.sources,
-                timeoutMs: config.timeout,
-              })
-                .then((data) => {
-                  cache = { data, ts: Date.now() };
-                  return data;
-                })
-                .finally(() => {
-                  updating = null;
-                });
-            }
-            await updating;
-          }
-          const data = cache!.data;
+          await ensureUsableCache();
 
-          // 设置缓存头
+          const cache = state.cache;
+          if (!cache) {
+            throw new Error("Cache unavailable after refresh");
+          }
+
+          const now = Date.now();
+          const isFresh = cache.expiresAt > now;
+          if (!isFresh) {
+            void triggerRefresh("request-stale");
+          }
+
+          const data = cache.data;
           const headers = new Headers({
             "Content-Type": "application/json",
-            "Cache-Control": `public, max-age=${Math.floor(
-              config.cacheTime / 2
-            )}`,
+            "Cache-Control": `public, max-age=${Math.floor(config.cacheTime / 2)}`,
             ETag: `"${data.generatedAt}"`,
           });
 
-          // 检查 If-None-Match 头 (ETag 缓存)
           const clientETag = request.headers.get("If-None-Match");
           if (clientETag === `"${data.generatedAt}"`) {
             return withCors(new Response(null, { status: 304, headers }));
@@ -140,33 +224,32 @@ async function createServer(config: ServerConfig) {
           return withCors(new Response(JSON.stringify(data), { headers }));
         }
 
-        // 强制更新端点 (仅在开发环境或特定条件下可用)
         if (path === "/refresh" && request.method === "POST") {
-          updating = buildRegistry({
-            sources: config.sources,
-            timeoutMs: config.timeout,
-          })
-            .then((data) => {
-              cache = { data, ts: Date.now() };
-              return data;
-            })
-            .finally(() => {
-              updating = null;
-            });
-          const data = await updating;
+          await triggerRefresh("manual", true);
+          const cache = state.cache;
+          if (!cache) {
+            return withCors(
+              Response.json(
+                {
+                  error: "Refresh failed",
+                  message: state.error ?? "Unknown error",
+                },
+                { status: 500 }
+              )
+            );
+          }
           return withCors(
             Response.json({
               message: "Registry refreshed successfully",
-              total: data.total,
-              generatedAt: data.generatedAt,
+              total: cache.data.total,
+              generatedAt: cache.data.generatedAt,
             })
           );
         }
 
-        // 404
         return withCors(new Response("Not Found", { status: 404 }));
       } catch (error) {
-        console.error("Server error:", error);
+        console.error(`${logPrefix} server error:`, error);
         return withCors(
           Response.json(
             {
@@ -180,55 +263,21 @@ async function createServer(config: ServerConfig) {
     },
   });
 
-  return server;
+  const originalStop = server.stop.bind(server);
+  const stop = () => {
+    if (state.refreshTimer) {
+      clearInterval(state.refreshTimer);
+      state.refreshTimer = null;
+    }
+    return originalStop();
+  };
+
+  const refresh = async (reason = "manual") => {
+    await triggerRefresh(reason, true);
+  };
+
+  await triggerRefresh("startup", true);
+  scheduleProactiveRefresh();
+
+  return Object.assign(server, { stop, refresh }) as MirrorServer;
 }
-
-// 主函数
-async function main() {
-  const config = { ...DEFAULT_CONFIG };
-
-  console.info("🚀 Starting Koishi Registry Mirror Server...");
-  console.info(`📋 Configuration:`);
-  console.info(`   Port: ${config.port}`);
-  console.info(`   Host: ${config.host}`);
-  console.info(`   Cache Time: ${config.cacheTime}s`);
-  console.info(`   Timeout: ${config.timeout}ms`);
-  console.info(`   Sources: ${config.sources.length} upstream(s)`);
-  console.info(`   CORS Origin: ${config.corsOrigin}`);
-
-  try {
-    const server = await createServer(config);
-
-    console.info(`✅ Server running at http://${config.host}:${config.port}`);
-    console.info(
-      `📄 Registry endpoint: http://${config.host}:${config.port}/index.json`
-    );
-    console.info(
-      `💊 Health check: http://${config.host}:${config.port}/health`
-    );
-    console.info(`📊 Status: http://${config.host}:${config.port}/status`);
-
-    // 优雅关闭处理
-    const shutdown = () => {
-      console.info("🛑 Shutting down server...");
-      server.stop();
-      process.exit(0);
-    };
-
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
-  } catch (error) {
-    console.error("❌ Failed to start server:", error);
-    process.exit(1);
-  }
-}
-
-// 启动服务器
-if (import.meta.main) {
-  main().catch((error) => {
-    console.error("💥 Unhandled error:", error);
-    process.exit(1);
-  });
-}
-
-export { createServer, type ServerConfig };

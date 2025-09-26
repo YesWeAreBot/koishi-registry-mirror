@@ -21,8 +21,6 @@ const DEFAULT_SOURCES = [
   "https://koishi-registry.yumetsuki.moe/index.json",
   "https://kp.itzdrli.cc/index.json",
   "https://registry.koishi.t4wefan.pub/index.json",
-  "https://cdn.jsdelivr.net/gh/YesWeAreBot/koishi-registry-mirror@pages/index.json",
-  "https://gh-proxy.com/https://raw.githubusercontent.com/YesWeAreBot/koishi-registry-mirror/refs/heads/pages/index.json",
 ];
 
 export function loadConfig(argv: string[] = Bun.argv.slice(2)): AppConfig {

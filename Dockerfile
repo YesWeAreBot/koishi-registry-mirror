@@ -5,7 +5,7 @@ FROM oven/bun:1 as base
 WORKDIR /app
 
 # 复制 package.json 和 lock 文件
-COPY package.json bun.lockb* ./
+COPY package.json bun.lock* ./
 
 # 安装依赖
 # 开发和构建都需要 TypeScript 等 dev 依赖
