@@ -17,26 +17,11 @@ export interface AppConfig {
   rawUrl: string | null;
 }
 
-const DEFAULT_SOURCES = [
-  "https://koishi-registry.yumetsuki.moe/index.json",
-  "https://kp.itzdrli.cc/index.json",
-  "https://registry.koishi.t4wefan.pub/index.json",
-];
+const DEFAULT_SOURCES = ["https://koishi-registry.yumetsuki.moe/index.json", "https://kp.itzdrli.cc/index.json", "https://registry.koishi.t4wefan.pub/index.json"];
 
 export function loadConfig(argv: string[] = Bun.argv.slice(2)): AppConfig {
   const args = minimist(argv, {
-    string: [
-      "mode",
-      "sources",
-      "host",
-      "cors",
-      "cors-origin",
-      "output",
-      "port",
-      "timeout",
-      "cache",
-      "cache-time",
-    ],
+    string: ["mode", "sources", "host", "cors", "cors-origin", "output", "port", "timeout", "cache", "cache-time"],
     alias: {
       p: "port",
       h: "host",
@@ -48,19 +33,13 @@ export function loadConfig(argv: string[] = Bun.argv.slice(2)): AppConfig {
   });
 
   // positional command support, e.g. `bun run src/cli.ts server` or `generate`
-  const positional =
-    Array.isArray(args._) && args._.length > 0 ? String(args._[0]) : undefined;
+  const positional = Array.isArray(args._) && args._.length > 0 ? String(args._[0]) : undefined;
   const modeEnv = (process.env.MODE || "").toLowerCase();
   const modeArg = String(args.mode || positional || "server").toLowerCase();
-  const mode: Mode =
-    modeArg === "generate" || modeEnv === "generate" ? "generate" : "server";
+  const mode: Mode = modeArg === "generate" || modeEnv === "generate" ? "generate" : "server";
 
   // sources from CLI/env/default
-  const sourcesStr =
-    (typeof args.sources === "string" && args.sources) ||
-    process.env.SOURCES ||
-    process.env.REGISTRY_SOURCES ||
-    "";
+  const sourcesStr = (typeof args.sources === "string" && args.sources) || process.env.SOURCES || process.env.REGISTRY_SOURCES || "";
   const sources = sourcesStr
     ? sourcesStr
         .split(",")
@@ -71,25 +50,16 @@ export function loadConfig(argv: string[] = Bun.argv.slice(2)): AppConfig {
   // numbers
   const port = toInt(args.port, toInt(process.env.PORT, 3000));
   const timeoutMs = toInt(args.timeout, toInt(process.env.TIMEOUT_MS, 15000));
-  const cacheSeconds = toInt(
-    args["cache-time"] ?? args.cache,
-    toInt(process.env.CACHE_SECONDS ?? process.env.CACHE_TIME, 300)
-  );
+  const cacheSeconds = toInt(args["cache-time"] ?? args.cache, toInt(process.env.CACHE_SECONDS ?? process.env.CACHE_TIME, 300));
 
   // others
   const host = String(args.host || process.env.HOST || "0.0.0.0");
-  const corsOrigin = String(
-    args["cors-origin"] || args.cors || process.env.CORS_ORIGIN || "*"
-  );
+  const corsOrigin = String(args["cors-origin"] || args.cors || process.env.CORS_ORIGIN || "*");
 
   // output and raw url (generate mode)
-  const outputFile = String(
-    args.output || process.env.OUTPUT_FILE || "index.json"
-  );
+  const outputFile = String(args.output || process.env.OUTPUT_FILE || "index.json");
   const repo = process.env.GITHUB_REPOSITORY; // e.g. owner/repo
-  const rawUrl = repo
-    ? `https://raw.githubusercontent.com/${repo}/pages/${outputFile}`
-    : null;
+  const rawUrl = repo ? `https://raw.githubusercontent.com/${repo}/pages/${outputFile}` : null;
 
   return {
     mode,

@@ -31,9 +31,7 @@ async function run() {
   });
 
   console.info(`✅ Server running at http://${config.host}:${config.port}`);
-  console.info(
-    `📄 Registry endpoint: http://${config.host}:${config.port}/index.json`
-  );
+  console.info(`📄 Registry endpoint: http://${config.host}:${config.port}/index.json`);
   console.info(`💊 Health check: http://${config.host}:${config.port}/health`);
   console.info(`📊 Status: http://${config.host}:${config.port}/status`);
 

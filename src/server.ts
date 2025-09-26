@@ -1,14 +1,7 @@
 import { buildRegistry, RegistryResult } from "./registry";
+import type { Api, Server as ServerTypes } from "./types";
 
-export interface ServerConfig {
-  port: number;
-  cacheTime: number;
-  timeout: number;
-  sources: string[];
-  host: string;
-  corsOrigin: string;
-  rawUrl?: string | null;
-}
+export interface ServerConfig extends ServerTypes.ServerConfig {}
 
 interface CacheEntry {
   data: RegistryResult;
@@ -28,10 +21,7 @@ interface InternalState {
 
 const logPrefix = "[registry-mirror]";
 
-export type MirrorServer = BunServer & {
-  stop(): number;
-  refresh(reason?: string): Promise<void>;
-};
+export type MirrorServer = ServerTypes.MirrorServer;
 
 export async function createServer(config: ServerConfig): Promise<MirrorServer> {
   const ttlMs = Math.max(1_000, config.cacheTime * 1_000);
@@ -62,9 +52,7 @@ export async function createServer(config: ServerConfig): Promise<MirrorServer> 
   const runRefresh = async (reason: string, failHard: boolean): Promise<void> => {
     const started = Date.now();
     state.lastRefreshReason = reason;
-    console.info(
-      `${logPrefix} refresh started (${reason}) with ${config.sources.length} source(s)`
-    );
+    console.info(`${logPrefix} refresh started (${reason}) with ${config.sources.length} source(s)`);
     try {
       const data = await buildRegistry({
         sources: config.sources,
@@ -78,9 +66,7 @@ export async function createServer(config: ServerConfig): Promise<MirrorServer> 
         expiresAt: fetchedAt + ttlMs,
       };
       state.error = null;
-      console.info(
-        `${logPrefix} refresh succeeded in ${Date.now() - started}ms (reason: ${reason}, total: ${data.total})`
-      );
+      console.info(`${logPrefix} refresh succeeded in ${Date.now() - started}ms (reason: ${reason}, total: ${data.total})`);
     } catch (error) {
       state.error = error instanceof Error ? error.message : String(error);
       console.error(`${logPrefix} refresh failed (${reason}):`, error);
@@ -146,7 +132,7 @@ export async function createServer(config: ServerConfig): Promise<MirrorServer> 
         if (path === "/health") {
           const cache = state.cache;
           const healthy = Boolean(cache);
-          const payload = {
+          const payload: Api.HealthResponse = {
             healthy,
             lastUpdate: cache?.data.generatedAt ?? null,
             cacheExpiry: cache ? new Date(cache.expiresAt).toISOString() : null,
@@ -161,7 +147,7 @@ export async function createServer(config: ServerConfig): Promise<MirrorServer> 
         if (path === "/status") {
           const mem = process.memoryUsage();
           const cache = state.cache;
-          const payload = {
+          const payload: Api.StatusResponse = {
             config: {
               port: config.port,
               host: config.host,
@@ -175,10 +161,7 @@ export async function createServer(config: ServerConfig): Promise<MirrorServer> 
                   fetchedAt: new Date(cache.fetchedAt).toISOString(),
                   expiresAt: new Date(cache.expiresAt).toISOString(),
                   ageSeconds: Math.max(0, Math.floor((Date.now() - cache.fetchedAt) / 1_000)),
-                  remainingSeconds: Math.max(
-                    0,
-                    Math.floor((cache.expiresAt - Date.now()) / 1_000)
-                  ),
+                  remainingSeconds: Math.max(0, Math.floor((cache.expiresAt - Date.now()) / 1_000)),
                   totalPlugins: cache.data.total,
                 }
               : null,

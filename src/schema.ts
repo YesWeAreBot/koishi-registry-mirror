@@ -1,17 +1,9 @@
 import Schema from "schemastery";
+import type { Plugin, Registry } from "./types";
 
-export interface Data {
-  info: string;
-  total: number;
-  time: string;
-  version: number;
-  generatedAt: string;
-  rawUrl: string;
-  sources: string[];
-  objects: Object[];
-}
+export type { Plugin, Registry } from "./types";
 
-export const Data: Schema<Data> = Schema.object({
+export const DataSchema: Schema<Registry.Index> = Schema.object({
   info: Schema.string(),
   total: Schema.number().min(0),
   time: Schema.string(),
@@ -19,50 +11,27 @@ export const Data: Schema<Data> = Schema.object({
   generatedAt: Schema.string(),
   rawUrl: Schema.string(),
   sources: Schema.array(Schema.string()),
-  objects: Schema.array(Schema.lazy(() => Object)),
+  objects: Schema.array(Schema.lazy(() => ObjectSchema)),
 });
 
 /** ---------------- 单个插件对象 ---------------- **/
-export interface Object {
-  _id: string;
-  package: PackageInfo;
-  category: string;
-  createdAt: string;
-  dependents: number;
-  downloads: Downloads;
-  flags: Flags;
-  ignored: boolean;
-  insecure: boolean;
-  installSize: number;
-  license: string;
-  manifest: Manifest;
-  portable: boolean;
-  publishSize: number;
-  rating: number;
-  score: Score;
-  shortname: string;
-  updated: string;
-  updatedAt: string;
-  verified: boolean;
-}
-
-export const Object: Schema<Object> = Schema.object({
+export const ObjectSchema: Schema<Plugin.Entry> = Schema.object({
   _id: Schema.string(),
-  package: Schema.lazy(() => PackageInfo),
+  package: Schema.lazy(() => PackageInfoSchema),
   category: Schema.string(),
   createdAt: Schema.string(),
   dependents: Schema.number().min(0),
-  downloads: Schema.lazy(() => Downloads),
-  flags: Schema.lazy(() => Flags),
+  downloads: Schema.lazy(() => DownloadsSchema),
+  flags: Schema.lazy(() => FlagsSchema),
   ignored: Schema.boolean(),
   insecure: Schema.boolean(),
   installSize: Schema.number().min(0),
   license: Schema.string(),
-  manifest: Schema.lazy(() => Manifest),
+  manifest: Schema.lazy(() => ManifestSchema),
   portable: Schema.boolean(),
   publishSize: Schema.number().min(0),
   rating: Schema.number(),
-  score: Schema.lazy(() => Score),
+  score: Schema.lazy(() => ScoreSchema),
   shortname: Schema.string(),
   updated: Schema.string(),
   updatedAt: Schema.string(),
@@ -70,66 +39,34 @@ export const Object: Schema<Object> = Schema.object({
 });
 
 /** ---------------- 包信息 ---------------- **/
-export interface PackageInfo {
-  name: string;
-  keywords: string[];
-  version: string;
-  description: string;
-  publisher: Publisher;
-  maintainers: Maintainer[];
-  license: string;
-  date: string; // ISO8601
-  links: Links;
-  contributors: Contributor[];
-}
-
-export const PackageInfo: Schema<PackageInfo> = Schema.object({
+export const PackageInfoSchema: Schema<Plugin.Package> = Schema.object({
   name: Schema.string(),
   keywords: Schema.array(Schema.string()),
   version: Schema.string(),
   description: Schema.string(),
-  publisher: Schema.lazy(() => Publisher),
-  maintainers: Schema.array(Schema.lazy(() => Maintainer)),
+  publisher: Schema.lazy(() => PublisherSchema),
+  maintainers: Schema.array(Schema.lazy(() => MaintainerSchema)),
   license: Schema.string(),
   date: Schema.string(),
-  links: Schema.lazy(() => Links),
-  contributors: Schema.array(Schema.lazy(() => Contributor)),
+  links: Schema.lazy(() => LinksSchema),
+  contributors: Schema.array(Schema.lazy(() => ContributorSchema)),
 });
 
 /** ---------------- 发布者/维护者 ---------------- **/
-export interface Publisher {
-  name: string;
-  email: string;
-  username: string;
-}
-
-export const Publisher: Schema<Publisher> = Schema.object({
+export const PublisherSchema: Schema<Plugin.Publisher> = Schema.object({
   name: Schema.string(),
   email: Schema.string(),
   username: Schema.string(),
 });
 
-export interface Maintainer {
-  name: string;
-  email: string;
-  username: string;
-}
-
-export const Maintainer: Schema<Maintainer> = Schema.object({
+export const MaintainerSchema: Schema<Plugin.Maintainer> = Schema.object({
   name: Schema.string(),
   email: Schema.string(),
   username: Schema.string(),
 });
 
 /** ---------------- 链接信息 ---------------- **/
-export interface Links {
-  npm: string;
-  bugs?: string;
-  homepage?: string;
-  repository?: string;
-}
-
-export const Links: Schema<Links> = Schema.object({
+export const LinksSchema: Schema<Plugin.Links> = Schema.object({
   npm: Schema.string(),
   bugs: Schema.string(),
   homepage: Schema.string(),
@@ -137,72 +74,33 @@ export const Links: Schema<Links> = Schema.object({
 });
 
 /** ---------------- 贡献者 ---------------- **/
-export interface Contributor {
-  name?: string;
-  email?: string;
-  username?: string;
-}
-
-export const Contributor: Schema<Contributor> = Schema.object({
+export const ContributorSchema: Schema<Plugin.Contributor> = Schema.object({
   name: Schema.string(),
   email: Schema.string(),
   username: Schema.string(),
 });
 
 /** ---------------- 下载信息 ---------------- **/
-export interface Downloads {
-  lastMonth: number;
-}
-
-export const Downloads: Schema<Downloads> = Schema.object({
+export const DownloadsSchema: Schema<Plugin.Downloads> = Schema.object({
   lastMonth: Schema.number().min(0),
 });
 
 /** ---------------- 安全标志 ---------------- **/
-export interface Flags {
-  insecure: number;
-}
-
-export const Flags: Schema<Flags> = Schema.object({
+export const FlagsSchema: Schema<Plugin.Flags> = Schema.object({
   insecure: Schema.number().min(0),
 });
 
 /** ---------------- 多语言描述 ---------------- **/
-export interface LocaleString {
-  en?: string;
-  zh?: string;
-  [lang: string]: string | undefined;
-}
-
-export const LocaleString: Schema<LocaleString> = Schema.object({
+export const LocaleStringSchema: Schema<Plugin.LocaleString> = Schema.object({
   en: Schema.string(),
   zh: Schema.string(),
 });
 
 /** ---------------- Manifest ---------------- **/
-export interface Manifest {
-  public?: string[];
-  category?: string;
-  description: LocaleString | string;
-  service?:
-    | {
-        implements?: string[];
-        required?: string[];
-        optional?: string[];
-      }
-    | string[];
-  services?:
-    | {
-        required?: string[];
-      }
-    | string[];
-  locales: string[] | Record<string, string>;
-}
-
-export const Manifest: Schema<Manifest> = Schema.object({
+export const ManifestSchema: Schema<Plugin.Manifest> = Schema.object({
   public: Schema.array(Schema.string()),
   category: Schema.string(),
-  description: Schema.union([Schema.lazy(() => LocaleString), Schema.string()]),
+  description: Schema.union([Schema.lazy(() => LocaleStringSchema), Schema.string()]),
   service: Schema.union([
     Schema.object({
       implements: Schema.array(Schema.string()),
@@ -221,16 +119,7 @@ export const Manifest: Schema<Manifest> = Schema.object({
 });
 
 /** ---------------- 分数 ---------------- **/
-export interface Score {
-  final: number;
-  detail: {
-    quality: number;
-    popularity: number;
-    maintenance: number;
-  };
-}
-
-export const Score: Schema<Score> = Schema.object({
+export const ScoreSchema: Schema<Plugin.Score> = Schema.object({
   final: Schema.number(),
   detail: Schema.object({
     quality: Schema.number(),

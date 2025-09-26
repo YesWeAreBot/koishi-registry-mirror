@@ -1,5 +1,6 @@
 import axios from "axios";
-import { Data, Object as PluginObject } from "./schema";
+import { DataSchema } from "./schema";
+import type { Registry, Plugin } from "./types";
 
 export interface RegistryOptions {
   sources: string[];
@@ -7,33 +8,25 @@ export interface RegistryOptions {
   rawUrl?: string | null;
 }
 
-export interface RegistryResult extends Data {}
+export interface RegistryResult extends Registry.Index {}
 
 /**
  * 从上游拉取、合并、规范化并返回 registry 数据
  */
-export async function buildRegistry(
-  options: RegistryOptions
-): Promise<RegistryResult> {
+export async function buildRegistry(options: RegistryOptions): Promise<RegistryResult> {
   const { sources, timeoutMs, rawUrl } = options;
   const generatedAt = new Date().toISOString();
 
-  const results = await Promise.allSettled(
-    sources.map((url) => fetchFromSource(url, timeoutMs))
-  );
+  const results = await Promise.allSettled(sources.map((url) => fetchFromSource(url, timeoutMs)));
 
-  const plugins: PluginObject[] = [];
+  const plugins: Plugin.Entry[] = [];
   for (const [i, res] of results.entries()) {
     if (res.status === "fulfilled") {
-      console.log(
-        `✅ Source ${sources[i]} returned ${res.value.length} plugins`
-      );
+      console.log(`✅ Source ${sources[i]} returned ${res.value.length} plugins`);
       plugins.push(...res.value);
     } else {
       const reason = (res as PromiseRejectedResult).reason;
-      console.error(
-        `❌ Source ${sources[i]} failed: ${reason?.message || reason}`
-      );
+      console.error(`❌ Source ${sources[i]} failed: ${reason?.message || reason}`);
     }
   }
 
@@ -43,11 +36,9 @@ export async function buildRegistry(
 
   const deduped = mergePlugins(plugins);
   const normalized = deduped.map(normalizePlugin);
-  normalized.push(
-    createStatusPlugin(normalized.length, generatedAt, rawUrl || undefined)
-  );
+  normalized.push(createStatusPlugin(normalized.length, generatedAt, rawUrl || undefined));
 
-  const output: Data = {
+  const output: Registry.Index = {
     info: "Koishi Registry Mirror",
     total: normalized.length,
     time: new Date().toUTCString(),
@@ -59,14 +50,11 @@ export async function buildRegistry(
   };
 
   // runtime validate
-  Data(output);
+  DataSchema(output);
   return output;
 }
 
-async function fetchFromSource(
-  url: string,
-  timeoutMs: number
-): Promise<PluginObject[]> {
+async function fetchFromSource(url: string, timeoutMs: number): Promise<Plugin.Entry[]> {
   const res = await axios.get(url, {
     timeout: timeoutMs,
     validateStatus: (status) => status < 500,
@@ -74,14 +62,14 @@ async function fetchFromSource(
   if (!res.data || !Array.isArray(res.data.objects)) {
     throw new Error(`Invalid format from source ${url}`);
   }
-  return res.data.objects as PluginObject[];
+  return res.data.objects as Plugin.Entry[];
 }
 
 /**
  * 按 package.name 或 shortname 去重，保留 updatedAt 最新的
  */
-export function mergePlugins(plugins: PluginObject[]): PluginObject[] {
-  const map = new Map<string, PluginObject>();
+export function mergePlugins(plugins: Plugin.Entry[]): Plugin.Entry[] {
+  const map = new Map<string, Plugin.Entry>();
   for (const p of plugins) {
     const key = p.package?.name || p.shortname;
     if (!key) continue;
@@ -89,9 +77,7 @@ export function mergePlugins(plugins: PluginObject[]): PluginObject[] {
     if (!prev) {
       map.set(key, p);
     } else {
-      const newer =
-        new Date(p.updatedAt || 0).getTime() >
-        new Date(prev.updatedAt || 0).getTime();
+      const newer = new Date(p.updatedAt || 0).getTime() > new Date(prev.updatedAt || 0).getTime();
       if (newer) map.set(key, p);
     }
   }
@@ -101,7 +87,7 @@ export function mergePlugins(plugins: PluginObject[]): PluginObject[] {
 /**
  * 规范化插件对象，确保必需字段存在
  */
-export function normalizePlugin(plugin: Partial<PluginObject>): PluginObject {
+export function normalizePlugin(plugin: Partial<Plugin.Entry>): Plugin.Entry {
   const n: any = { ...plugin };
   n.manifest ||= {};
   n.manifest.service ||= { required: [], optional: [], implements: [] };
@@ -110,17 +96,13 @@ export function normalizePlugin(plugin: Partial<PluginObject>): PluginObject {
   n.manifest.service.implements ||= [];
   n.manifest.locales ||= [];
   n.manifest.description ||= plugin.package?.description || "";
-  return n as PluginObject;
+  return n as Plugin.Entry;
 }
 
 /**
  * 生成一个状态插件，展示镜像状态
  */
-export function createStatusPlugin(
-  count: number,
-  generatedAt: string,
-  rawUrl?: string
-): PluginObject {
+export function createStatusPlugin(count: number, generatedAt: string, rawUrl?: string): Plugin.Entry {
   const rssMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
   const formatted = new Date().toLocaleString("zh-CN", {
     year: "numeric",
@@ -183,5 +165,5 @@ export function createStatusPlugin(
     installSize: 0,
     dependents: 0,
     downloads: { lastMonth: 10000 },
-  } as PluginObject;
+  } as Plugin.Entry;
 }
